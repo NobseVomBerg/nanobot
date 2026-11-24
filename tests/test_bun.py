@@ -49,6 +49,25 @@ def test_bun_download_checks_hash_extracts_only_runtime_and_caches(download, tmp
     assert calls[0].startswith("https://github.com/oven-sh/bun/releases/download/bun-v")
 
 
+def test_bun_download_waits_for_scanner_lock_on_new_runtime(download, monkeypatch, tmp_path):
+    real_replace = os.replace
+    attempts = []
+
+    def locked_once(source, target):
+        attempts.append(source)
+        if len(attempts) == 1:
+            error = PermissionError(13, "The process cannot access the file")
+            error.winerror = 32
+            raise error
+        real_replace(source, target)
+
+    monkeypatch.setattr(bun.os, "replace", locked_once)
+    monkeypatch.setattr(bun.time, "sleep", lambda _: None)
+    executable = bun.ensure_bun(cache_dir=tmp_path)
+    assert Path(executable).read_bytes() == b"runtime"
+    assert len(attempts) == 2
+
+
 def test_bun_rejects_corrupt_download(download, monkeypatch, tmp_path):
     target, _ = download
     monkeypatch.setitem(bun._ARCHIVES, target, "0" * 64)

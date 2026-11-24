@@ -7,6 +7,7 @@ import platform
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.request
 import zipfile
 from collections.abc import Callable, Generator
@@ -81,6 +82,20 @@ def _target() -> str:
     return target
 
 
+def _replace_when_released(source: Path, target: Path) -> None:
+    # Windows virus scanners briefly lock a freshly written and executed binary
+    # (ERROR_SHARING_VIOLATION), so wait for the scan instead of failing at once.
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError as exc:
+            if getattr(exc, "winerror", None) != 32 or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.5)
+
+
 def ensure_bun(
     *, cache_dir: Path | None = None, output: Callable[[str], None] = print,
 ) -> str:
@@ -114,7 +129,7 @@ def ensure_bun(
                 candidate.chmod(0o755)
                 if not _matches_version(str(candidate)):
                     raise BunUnavailableError("Downloaded Bun cannot run on this system.")
-                os.replace(candidate, executable)
+                _replace_when_released(candidate, executable)
         except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
             raise BunUnavailableError(f"Could not prepare Bun {BUN_VERSION}: {exc}") from exc
     return str(executable)
