@@ -1649,6 +1649,20 @@ def test_one_shot_agent_renders_structured_tool_hints(mock_agent_runtime, enable
         print_progress.assert_not_called()
 
 
+def test_agent_message_prints_model_error_after_streaming_and_exits_nonzero(mock_agent_runtime):
+    async def process_direct(*_args, on_stream, hooks, **_kwargs):
+        await on_stream("Working on it")
+        for hook in hooks:
+            await hook.after_iteration(SimpleNamespace(stop_reason="error"))
+        return OutboundMessage(channel="cli", chat_id="direct", content="Error: invalid request")
+
+    mock_agent_runtime["agent_loop"].process_direct.side_effect = process_direct
+    result = runner.invoke(app, ["agent", "-m", "continue"])
+
+    assert result.exit_code == 1
+    assert mock_agent_runtime["print_response"].call_args.args[0] == "Error: invalid request"
+
+
 def test_agent_uses_explicit_config_path(mock_agent_runtime, tmp_path: Path, monkeypatch):
     config_path = tmp_path / "agent-config.json"
     config_path.write_text("{}")

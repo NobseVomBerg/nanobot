@@ -49,6 +49,11 @@ _THINKING_DISABLE_MIN_VERSIONS = {
     "sonnet": (5, 0),
 }
 _SAMPLING_DEPRECATED_MODELS = {"claude-mythos-preview"}
+# Replayed thinking blocks are signed against the request prefix they were
+# created with. History compaction rewrites that prefix, so let the API drop
+# blocks whose prefix no longer matches instead of rejecting the request.
+_THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01"
+_THINKING_BLOCK_BINDING = {"prefix_mismatch_behavior": "drop_block"}
 
 
 def _model_version_at_least(
@@ -641,14 +646,44 @@ class AnthropicProvider(LLMProvider):
         elif not omit_temperature:
             kwargs["temperature"] = temperature
 
+        replays_thinking = any(
+            isinstance(block, dict) and block.get("type") == "thinking"
+            for message in anthropic_msgs
+            if message["role"] == "assistant" and isinstance(message["content"], list)
+            for block in cast(list[object], message["content"])
+        )
+        if replays_thinking and "thinking" not in kwargs and adaptive_only:
+            # These models think adaptively by default; the binding control
+            # needs an explicit thinking object to attach to.
+            kwargs["thinking"] = {"type": "adaptive"}
+        thinking_param = cast(dict[str, Any] | None, kwargs.get("thinking"))
+        bind_thinking = (
+            replays_thinking
+            and thinking_param is not None
+            and thinking_param["type"] != "disabled"
+        )
+        if bind_thinking:
+            kwargs["thinking"] = {**thinking_param, "block_binding": dict(_THINKING_BLOCK_BINDING)}
+
         if anthropic_tools:
             kwargs["tools"] = anthropic_tools
             tc = self._convert_tool_choice(tool_choice, thinking_enabled)
             if tc:
                 kwargs["tool_choice"] = tc
 
-        if self.extra_headers:
-            kwargs["extra_headers"] = self.extra_headers
+        extra_headers = dict(self.extra_headers)
+        if bind_thinking:
+            beta = next(
+                (value for key, value in extra_headers.items() if key.lower() == "anthropic-beta"),
+                "",
+            )
+            extra_headers = {k: v for k, v in extra_headers.items() if k.lower() != "anthropic-beta"}
+            betas = [item.strip() for item in beta.split(",") if item.strip()]
+            if _THINKING_BINDING_BETA not in betas:
+                betas.append(_THINKING_BINDING_BETA)
+            extra_headers["anthropic-beta"] = ",".join(betas)
+        if extra_headers:
+            kwargs["extra_headers"] = extra_headers
         if self._extra_body:
             kwargs["extra_body"] = self._extra_body
 

@@ -253,7 +253,20 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
         return _cli_progress
 
     if message is not None:
-        async def run_once() -> None:
+        from nanobot.agent.hook import AgentHook, AgentHookContext
+
+        class _TurnFailure(AgentHook):
+            """Remember whether the turn's final model request failed."""
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.failed = False
+
+            async def after_iteration(self, context: AgentHookContext) -> None:
+                self.failed = context.stop_reason == "error"
+
+        async def run_once() -> bool:
+            failure = _TurnFailure()
             try:
                 await mcp_provider.connect()
                 renderer = stream_renderer_class(
@@ -267,8 +280,10 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                     on_progress=_make_progress(renderer),
                     on_stream=renderer.on_delta,
                     on_stream_end=renderer.on_end,
+                    hooks=[failure],
                 )
-                if not renderer.streamed:
+                # Streamed answers are already on screen; an error never is.
+                if not renderer.streamed or failure.failed:
                     await renderer.close()
                     print_kwargs: dict[str, Any] = {}
                     if renderer.header_printed:
@@ -279,10 +294,12 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                         metadata=response.metadata if response else None,
                         **print_kwargs,
                     )
+                return failure.failed
             finally:
                 await _close_runtime()
 
-        asyncio.run(run_once())
+        if asyncio.run(run_once()):
+            raise typer.Exit(1)
     else:
         from nanobot.bus.events import InboundMessage
 

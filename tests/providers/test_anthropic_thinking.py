@@ -187,3 +187,37 @@ def test_reasoning_effort_string_none_does_not_enable_thinking() -> None:
     kw = _build(_make_provider(), "none")
     assert "thinking" not in kw
     assert kw["temperature"] == 0.7
+
+
+_REPLAYED_THINKING = [
+    {"role": "user", "content": "run the tests"},
+    {
+        "role": "assistant",
+        "content": "",
+        "thinking_blocks": [{"type": "thinking", "thinking": "plan", "signature": "sig"}],
+        "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "exec", "arguments": "{}"}}],
+    },
+    {"role": "tool", "tool_call_id": "call_1", "content": "ok"},
+]
+
+
+def test_replayed_thinking_drops_blocks_with_mismatched_prefix() -> None:
+    provider = _make_provider("claude-sonnet-5-5")
+    provider.extra_headers = {"anthropic-beta": "existing-beta"}
+    kw = _build(provider, "medium", messages=_REPLAYED_THINKING)
+    assert kw["thinking"] == {
+        "type": "adaptive",
+        "block_binding": {"prefix_mismatch_behavior": "drop_block"},
+    }
+    assert kw["extra_headers"]["anthropic-beta"] == "existing-beta,thinking-binding-controls-2026-08-01"
+
+
+def test_replayed_thinking_with_default_effort_still_binds_blocks() -> None:
+    kw = _build(_make_provider("claude-sonnet-5-5"), None, messages=_REPLAYED_THINKING)
+    assert kw["thinking"]["block_binding"] == {"prefix_mismatch_behavior": "drop_block"}
+
+
+def test_fresh_conversation_sends_no_binding_beta() -> None:
+    kw = _build(_make_provider("claude-sonnet-5-5"), "medium")
+    assert "block_binding" not in kw["thinking"]
+    assert "extra_headers" not in kw
