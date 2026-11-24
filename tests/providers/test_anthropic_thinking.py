@@ -97,6 +97,7 @@ def test_opus_4_8_omits_temperature_adaptive() -> None:
         pytest.param("claude-opus-4-8", id="opus_4_8_high_uses_adaptive_effort"),
         pytest.param("claude-fable-5", id="fable_high_uses_adaptive_effort"),
         pytest.param("claude-sonnet-5", id="sonnet_5_high_uses_adaptive_effort"),
+        pytest.param("anthropic/claude-haiku-5-5", id="haiku_5_5_high_uses_adaptive_effort"),
     ],
 )
 def test_adaptive_models_use_high_effort(model) -> None:

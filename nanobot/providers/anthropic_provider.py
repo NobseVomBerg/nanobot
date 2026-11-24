@@ -41,6 +41,7 @@ _CLAUDE_MODEL_VERSION = re.compile(
 _ADAPTIVE_ONLY_MIN_VERSIONS = {
     "opus": (4, 7),
     "sonnet": (5, 0),
+    "haiku": (5, 0),
     "fable": (5, 0),
     "mythos": (5, 0),
 }
